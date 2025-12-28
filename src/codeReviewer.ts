@@ -87,15 +87,71 @@ export class CodeReviewer {
 	}
 
 	async writeFile(filePath: string, content: string): Promise<{ success: boolean }> {
-		fs.writeFileSync(filePath, content, 'utf-8');
-		const relativePath = this.getRelativePath(filePath);
-		const message = `✍️  Fixed: ${relativePath}`;
-		this.outputChannel.appendLine(message);
-		if (this.chatbotPanel) {
-			this.chatbotPanel.sendMessage(message, 'assistant');
-			this.chatbotPanel.sendProgress(message);
+		// Read current file content
+		let originalContent = '';
+		try {
+			originalContent = fs.readFileSync(filePath, 'utf-8');
+		} catch (error) {
+			// File doesn't exist, treat as new file
+			originalContent = '';
 		}
+
+		// If content is the same, no need to show suggestion
+		if (originalContent === content) {
+			const relativePath = this.getRelativePath(filePath);
+			const message = `ℹ️  No changes needed: ${relativePath}`;
+			this.outputChannel.appendLine(message);
+			if (this.chatbotPanel) {
+				this.chatbotPanel.sendMessage(message, 'assistant');
+			}
+			return { success: true };
+		}
+
+		// Generate diff
+		const diff = this.generateDiff(originalContent, content);
+		const relativePath = this.getRelativePath(filePath);
+
+		// Send suggestion to chatbot panel instead of writing directly
+		if (this.chatbotPanel) {
+			this.chatbotPanel.sendCodeSuggestion({
+				filePath: filePath,
+				fileName: path.basename(filePath),
+				originalContent: originalContent,
+				suggestedContent: content,
+				diff: diff,
+				relativePath: relativePath
+			});
+		}
+
+		// Return success but don't actually write yet - wait for user approval
 		return { success: true };
+	}
+
+	private generateDiff(oldContent: string, newContent: string): { removed: string[], added: string[] } {
+		const oldLines = oldContent.split('\n');
+		const newLines = newContent.split('\n');
+		
+		const removed: string[] = [];
+		const added: string[] = [];
+		
+		// Simple line-by-line diff
+		const maxLength = Math.max(oldLines.length, newLines.length);
+		
+		for (let i = 0; i < maxLength; i++) {
+			if (i >= oldLines.length) {
+				// New lines added
+				added.push(newLines[i]);
+			} else if (i >= newLines.length) {
+				// Lines removed
+				removed.push(oldLines[i]);
+			} else if (oldLines[i] !== newLines[i]) {
+				// Line changed
+				removed.push(oldLines[i]);
+				added.push(newLines[i]);
+			}
+		}
+		
+		return { removed, added };
 	}
 
 	private getTools() {

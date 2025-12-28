@@ -65,6 +65,9 @@ export class ChatbotPanel {
 					case 'sendMessage':
 						await this._handleUserMessage(message.text);
 						return;
+					case 'applySuggestion':
+						await this._handleApplySuggestion(message.suggestion);
+						return;
 					case 'ready':
 						this._checkInitialState();
 						return;
@@ -368,6 +371,25 @@ export class ChatbotPanel {
 		this._sendMessage({ type: 'suggestion', suggestion });
 	}
 
+	public sendCodeSuggestion(suggestion: {
+		filePath: string;
+		fileName: string;
+		originalContent: string;
+		suggestedContent: string;
+		diff: { removed: string[]; added: string[] };
+		relativePath: string;
+	}) {
+		this._sendMessage({ 
+			type: 'codeSuggestion', 
+			suggestion: {
+				...suggestion,
+				title: `Code changes for ${suggestion.fileName}`,
+				description: `Proposed changes to ${suggestion.relativePath}`,
+				type: 'refactor'
+			}
+		});
+	}
+
 	public sendProgress(message: string) {
 		this._sendMessage({ type: 'progress', message });
 	}
@@ -378,6 +400,32 @@ export class ChatbotPanel {
 
 	public sendError(error: string) {
 		this._sendMessage({ type: 'message', role: 'assistant', content: `Error: ${error}` });
+	}
+
+	private async _handleApplySuggestion(suggestion: any) {
+		try {
+			// Write the suggested content to the file
+			fs.writeFileSync(suggestion.filePath, suggestion.suggestedContent, 'utf-8');
+			
+			// Send confirmation message
+			this._sendMessage({
+				type: 'message',
+				role: 'assistant',
+				content: `✅ Applied changes to ${suggestion.relativePath || suggestion.fileName}`
+			});
+			
+			// Optionally open the file in editor
+			const doc = await vscode.workspace.openTextDocument(suggestion.filePath);
+			await vscode.window.showTextDocument(doc);
+			
+		} catch (error: any) {
+			this._sendMessage({
+				type: 'message',
+				role: 'assistant',
+				content: `❌ Error applying changes: ${error.message}`
+			});
+			vscode.window.showErrorMessage(`Failed to apply changes: ${error.message}`);
+		}
 	}
 
 	private _sendMessage(message: any) {
@@ -571,36 +619,34 @@ export class ChatbotPanel {
 			background: var(--vscode-textCodeBlock-background);
 			border-radius: 6px;
 			padding: 12px;
-			font-family: var(--vscode-editor-font-family);
+			font-family: 'Courier New', monospace;
 			font-size: 12px;
 			overflow-x: auto;
+			margin: 8px 0;
+			max-height: 400px;
+			overflow-y: auto;
+			border: 1px solid var(--vscode-panel-border);
 		}
 
 		.diff-line {
-			padding: 2px 0;
+			padding: 4px 8px;
 			font-family: 'Courier New', monospace;
+			white-space: pre;
+			line-height: 1.6;
+			margin: 2px 0;
+			word-break: break-all;
 		}
 
 		.diff-line.removed {
-			background: rgba(244, 67, 54, 0.1);
+			background: rgba(244, 67, 54, 0.15);
 			color: #f44336;
-		}
-
-		.diff-line.removed::before {
-			content: '- ';
-			color: #f44336;
-			font-weight: bold;
+			border-left: 3px solid #f44336;
 		}
 
 		.diff-line.added {
-			background: rgba(76, 175, 80, 0.1);
+			background: rgba(76, 175, 80, 0.15);
 			color: #4caf50;
-		}
-
-		.diff-line.added::before {
-			content: '+ ';
-			color: #4caf50;
-			font-weight: bold;
+			border-left: 3px solid #4caf50;
 		}
 
 		.suggestion-actions {
@@ -938,17 +984,37 @@ export class ChatbotPanel {
 				const diffContainer = document.createElement('div');
 				diffContainer.className = 'diff-container';
 				
-				if (suggestion.diff.old) {
+				// Handle new format: diff.removed and diff.added arrays
+				if (suggestion.diff.removed && Array.isArray(suggestion.diff.removed)) {
+					suggestion.diff.removed.forEach(line => {
+						const removedLine = document.createElement('div');
+						removedLine.className = 'diff-line removed';
+						removedLine.textContent = '- ' + line;
+						diffContainer.appendChild(removedLine);
+					});
+				}
+				
+				if (suggestion.diff.added && Array.isArray(suggestion.diff.added)) {
+					suggestion.diff.added.forEach(line => {
+						const addedLine = document.createElement('div');
+						addedLine.className = 'diff-line added';
+						addedLine.textContent = '+ ' + line;
+						diffContainer.appendChild(addedLine);
+					});
+				}
+				
+				// Handle old format: diff.old and diff.new (for backward compatibility)
+				if (suggestion.diff.old && !suggestion.diff.removed) {
 					const oldLine = document.createElement('div');
 					oldLine.className = 'diff-line removed';
-					oldLine.textContent = suggestion.diff.old;
+					oldLine.textContent = '- ' + suggestion.diff.old;
 					diffContainer.appendChild(oldLine);
 				}
 				
-				if (suggestion.diff.new) {
+				if (suggestion.diff.new && !suggestion.diff.added) {
 					const newLine = document.createElement('div');
 					newLine.className = 'diff-line added';
-					newLine.textContent = suggestion.diff.new;
+					newLine.textContent = '+ ' + suggestion.diff.new;
 					diffContainer.appendChild(newLine);
 				}
 				
@@ -960,9 +1026,17 @@ export class ChatbotPanel {
 			
 			const applyBtn = document.createElement('button');
 			applyBtn.className = 'suggestion-btn apply';
-			applyBtn.textContent = 'Apply Suggestion';
+			applyBtn.textContent = 'Accept Suggestion';
 			applyBtn.onclick = () => {
-				vscode.postMessage({ command: 'applySuggestion', suggestion });
+				// Pass the full suggestion object including filePath and suggestedContent
+				vscode.postMessage({ 
+					command: 'applySuggestion', 
+					suggestion: suggestion 
+				});
+				// Update button to show it was applied
+				applyBtn.textContent = 'Applied ✓';
+				applyBtn.disabled = true;
+				applyBtn.style.opacity = '0.6';
 			};
 			
 			const dismissBtn = document.createElement('button');
@@ -1113,6 +1187,11 @@ export class ChatbotPanel {
 					break;
 				
 				case 'suggestion':
+					addSuggestion(message.suggestion);
+					break;
+				
+				case 'codeSuggestion':
+					// Handle code suggestions with file changes
 					addSuggestion(message.suggestion);
 					break;
 				
