@@ -29,14 +29,8 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		try {
-			chatbotPanel.sendMessage('Starting code review...', 'assistant');
-			chatbotPanel.sendProgress('🔍 Analyzing code structure...');
-
 			const reviewer = new CodeReviewer(apiKey, outputChannel, chatbotPanel);
 			await reviewer.reviewCode(folderPath);
-
-			chatbotPanel.sendMessage('✅ Code review complete! Check the output channel for detailed results.', 'assistant');
-			outputChannel.show();
 		} catch (error: any) {
 			const errorMsg = error?.message || 'Unknown error occurred';
 			chatbotPanel.sendError(errorMsg);

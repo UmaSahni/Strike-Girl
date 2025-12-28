@@ -250,6 +250,10 @@ export class ChatbotPanel {
 		this._sendMessage({ type: 'progress', message });
 	}
 
+	public sendProgressComplete() {
+		this._sendMessage({ type: 'progressComplete' });
+	}
+
 	public sendError(error: string) {
 		this._sendMessage({ type: 'message', role: 'assistant', content: `Error: ${error}` });
 	}
@@ -340,6 +344,10 @@ export class ChatbotPanel {
 			align-items: center;
 			justify-content: center;
 			font-size: 18px;
+		}
+
+		.message-avatar.hidden {
+			display: none;
 		}
 
 		.message.user .message-avatar {
@@ -512,17 +520,24 @@ export class ChatbotPanel {
 		.input-container {
 			padding: 16px 20px;
 			border-top: 1px solid var(--vscode-panel-border);
-			background: var(--vscode-input-background);
+			background: var(--vscode-editor-background);
+			transition: background 0.2s ease;
 		}
 
 		.input-wrapper {
 			display: flex;
-			gap: 8px;
+			gap: 10px;
 			align-items: center;
 			background: var(--vscode-input-background);
 			border: 1px solid var(--vscode-input-border);
 			border-radius: 8px;
-			padding: 8px 12px;
+			padding: 18px 20px;
+		}
+
+		.input-wrapper:focus-within {
+			border: 1px solid var(--vscode-input-border);
+			box-shadow: none;
+			outline: none;
 		}
 
 		.chat-input {
@@ -533,24 +548,48 @@ export class ChatbotPanel {
 			font-size: 14px;
 			font-family: var(--vscode-font-family);
 			outline: none;
+			line-height: 1.5;
+			padding: 0;
+			box-shadow: none;
+		}
+
+		.chat-input:focus {
+			outline: none;
+			border: none;
+			box-shadow: none;
 		}
 
 		.chat-input::placeholder {
 			color: var(--vscode-input-placeholderForeground);
+			opacity: 0.6;
 		}
 
-		.send-icon {
+		.send-button {
 			cursor: pointer;
-			width: 24px;
-			height: 24px;
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			color: var(--vscode-textLink-foreground);
+			padding: 8px 16px;
+			background: var(--vscode-button-background);
+			color: var(--vscode-button-foreground);
+			border: 1px solid var(--vscode-button-border);
+			border-radius: 6px;
+			font-size: 13px;
+			font-weight: 500;
+			font-family: var(--vscode-font-family);
+			transition: all 0.2s ease;
+			flex-shrink: 0;
+			white-space: nowrap;
 		}
 
-		.send-icon:hover {
+		.send-button:hover {
+			opacity: 0.9;
+		}
+
+		.send-button:active {
 			opacity: 0.8;
+		}
+
+		.send-button:disabled {
+			opacity: 0.5;
+			cursor: not-allowed;
 		}
 
 		.api-key-container {
@@ -680,7 +719,7 @@ export class ChatbotPanel {
 					placeholder="Generate a question or provide Suggestions..."
 					autocomplete="off"
 				/>
-				<div class="send-icon" id="sendBtn">📤</div>
+				<button class="send-button" id="sendBtn">Send</button>
 			</div>
 		</div>
 	</div>
@@ -698,6 +737,7 @@ export class ChatbotPanel {
 		const progressText = document.getElementById('progressText');
 
 		let apiKeySet = false;
+		let lastMessageRole = null;
 
 		function addMessage(content, role) {
 			const messageDiv = document.createElement('div');
@@ -707,6 +747,11 @@ export class ChatbotPanel {
 			avatar.className = 'message-avatar';
 			avatar.textContent = role === 'user' ? '👤' : '🤖';
 			
+			// Only show avatar if role changed from last message
+			if (lastMessageRole === role) {
+				avatar.classList.add('hidden');
+			}
+			
 			const contentDiv = document.createElement('div');
 			contentDiv.className = 'message-content';
 			contentDiv.textContent = content;
@@ -715,6 +760,8 @@ export class ChatbotPanel {
 			messageDiv.appendChild(contentDiv);
 			messagesContainer.appendChild(messageDiv);
 			messagesContainer.scrollTop = messagesContainer.scrollHeight;
+			
+			lastMessageRole = role;
 		}
 
 		function addSuggestion(suggestion) {
@@ -724,6 +771,11 @@ export class ChatbotPanel {
 			const avatar = document.createElement('div');
 			avatar.className = 'message-avatar';
 			avatar.textContent = '🤖';
+			
+			// Only show avatar if role changed from last message
+			if (lastMessageRole === 'assistant') {
+				avatar.classList.add('hidden');
+			}
 			
 			const contentDiv = document.createElement('div');
 			contentDiv.className = 'message-content';
@@ -807,6 +859,8 @@ export class ChatbotPanel {
 			messageDiv.appendChild(contentDiv);
 			messagesContainer.appendChild(messageDiv);
 			messagesContainer.scrollTop = messagesContainer.scrollHeight;
+			
+			lastMessageRole = 'assistant';
 		}
 
 		function addFolderSelection(folders) {
@@ -816,6 +870,11 @@ export class ChatbotPanel {
 			const avatar = document.createElement('div');
 			avatar.className = 'message-avatar';
 			avatar.textContent = '🤖';
+			
+			// Only show avatar if role changed from last message
+			if (lastMessageRole === 'assistant') {
+				avatar.classList.add('hidden');
+			}
 			
 			const contentDiv = document.createElement('div');
 			contentDiv.className = 'message-content';
@@ -842,6 +901,8 @@ export class ChatbotPanel {
 			messageDiv.appendChild(contentDiv);
 			messagesContainer.appendChild(messageDiv);
 			messagesContainer.scrollTop = messagesContainer.scrollHeight;
+			
+			lastMessageRole = 'assistant';
 		}
 
 		function addStartButton(folderPath, folderName) {
@@ -851,6 +912,11 @@ export class ChatbotPanel {
 			const avatar = document.createElement('div');
 			avatar.className = 'message-avatar';
 			avatar.textContent = '🤖';
+			
+			// Only show avatar if role changed from last message
+			if (lastMessageRole === 'assistant') {
+				avatar.classList.add('hidden');
+			}
 			
 			const contentDiv = document.createElement('div');
 			contentDiv.className = 'message-content';
@@ -875,6 +941,8 @@ export class ChatbotPanel {
 			messageDiv.appendChild(contentDiv);
 			messagesContainer.appendChild(messageDiv);
 			messagesContainer.scrollTop = messagesContainer.scrollHeight;
+			
+			lastMessageRole = 'assistant';
 		}
 
 		function saveApiKey() {
