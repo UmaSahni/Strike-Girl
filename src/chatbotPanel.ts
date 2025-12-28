@@ -27,6 +27,7 @@ export class ChatbotPanel {
 			column || vscode.ViewColumn.One,
 			{
 				enableScripts: true,
+				retainContextWhenHidden: true,
 				localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')]
 			}
 		);
@@ -333,27 +334,12 @@ export class ChatbotPanel {
 			return;
 		}
 
-		const folderName = folderPath.split(/[\\/]/).pop() || folderPath;
-		const confirm = await vscode.window.showWarningMessage(
-			`Review and fix code in "${folderName}"? This will modify files.`,
-			'Yes, Start Review',
-			'Cancel'
-		);
-
-		if (confirm === 'Yes, Start Review') {
-			this._sendMessage({ 
-				type: 'message', 
-				role: 'assistant', 
-				content: 'Starting code review... This may take a few moments.' 
-			});
-			vscode.commands.executeCommand('stike.reviewCodeFromChatbot', folderPath, this._apiKey);
-		} else {
-			this._sendMessage({ 
-				type: 'message', 
-				role: 'assistant', 
-				content: 'Code review cancelled.' 
-			});
-		}
+		this._sendMessage({ 
+			type: 'message', 
+			role: 'assistant', 
+			content: 'Starting code review... This may take a few moments.' 
+		});
+		vscode.commands.executeCommand('stike.reviewCodeFromChatbot', folderPath, this._apiKey);
 	}
 
 	public sendMessage(content: string, role: 'user' | 'assistant' = 'assistant') {
@@ -371,7 +357,7 @@ export class ChatbotPanel {
 		this._sendMessage({ type: 'suggestion', suggestion });
 	}
 
-	public sendCodeSuggestion(suggestion: {
+	public async sendCodeSuggestion(suggestion: {
 		filePath: string;
 		fileName: string;
 		originalContent: string;
@@ -379,15 +365,7 @@ export class ChatbotPanel {
 		diff: { removed: string[]; added: string[] };
 		relativePath: string;
 	}) {
-		this._sendMessage({ 
-			type: 'codeSuggestion', 
-			suggestion: {
-				...suggestion,
-				title: `Code changes for ${suggestion.fileName}`,
-				description: `Proposed changes to ${suggestion.relativePath}`,
-				type: 'refactor'
-			}
-		});
+		await this._showDiffEditor(suggestion);
 	}
 
 	public sendProgress(message: string) {
@@ -400,6 +378,25 @@ export class ChatbotPanel {
 
 	public sendError(error: string) {
 		this._sendMessage({ type: 'message', role: 'assistant', content: `Error: ${error}` });
+	}
+
+	private async _showDiffEditor(suggestion: {
+		filePath: string;
+		fileName: string;
+		originalContent: string;
+		suggestedContent: string;
+		relativePath: string;
+	}) {
+		// Send suggestion directly to chatbot panel - no diff editor window
+		this._sendMessage({
+			type: 'codeSuggestion',
+			suggestion: {
+				...suggestion,
+				title: `Code changes for ${suggestion.fileName}`,
+				description: `Proposed changes to ${suggestion.relativePath}. Review the changes below and use Keep/Undo buttons.`,
+				type: 'refactor'
+			}
+		});
 	}
 
 	private async _handleApplySuggestion(suggestion: any) {
@@ -618,7 +615,7 @@ export class ChatbotPanel {
 		.diff-container {
 			background: var(--vscode-textCodeBlock-background);
 			border-radius: 6px;
-			padding: 12px;
+			padding: 0;
 			font-family: 'Courier New', monospace;
 			font-size: 12px;
 			overflow-x: auto;
@@ -628,25 +625,171 @@ export class ChatbotPanel {
 			border: 1px solid var(--vscode-panel-border);
 		}
 
+		.diff-pair {
+			position: relative;
+			margin: 0;
+			border-bottom: 1px solid var(--vscode-panel-border);
+		}
+
+		.diff-pair:last-child {
+			border-bottom: none;
+		}
+
+		.diff-line-wrapper {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			padding: 6px 12px;
+			position: relative;
+		}
+
+		.diff-line-wrapper:hover {
+			background: var(--vscode-list-hoverBackground);
+		}
+
+		.diff-line-wrapper:hover .diff-line-actions {
+			opacity: 1;
+		}
+
+		.diff-line-actions {
+			display: flex;
+			gap: 6px;
+			margin-left: auto;
+			opacity: 0;
+			transition: opacity 0.2s;
+		}
+
+		.diff-line-wrapper:hover .diff-line-actions {
+			opacity: 1;
+		}
+
 		.diff-line {
-			padding: 4px 8px;
+			flex: 1;
+			padding: 2px 0;
 			font-family: 'Courier New', monospace;
 			white-space: pre;
 			line-height: 1.6;
-			margin: 2px 0;
-			word-break: break-all;
+			word-break: break-word;
+			display: flex;
+			align-items: center;
+			gap: 8px;
+		}
+
+		.diff-line-num {
+			min-width: 24px;
+			text-align: right;
+			color: var(--vscode-descriptionForeground);
+			font-size: 11px;
+			user-select: none;
+		}
+
+		.diff-line-content {
+			flex: 1;
 		}
 
 		.diff-line.removed {
-			background: rgba(244, 67, 54, 0.15);
+			background: rgba(244, 67, 54, 0.1);
+		}
+
+		.diff-line-wrapper.removed {
+			background: rgba(244, 67, 54, 0.05);
+		}
+
+		.diff-line-wrapper.removed .diff-line-content {
 			color: #f44336;
-			border-left: 3px solid #f44336;
+			text-decoration: line-through;
 		}
 
 		.diff-line.added {
-			background: rgba(76, 175, 80, 0.15);
+			background: rgba(76, 175, 80, 0.1);
+		}
+
+		.diff-line-wrapper.added {
+			background: rgba(76, 175, 80, 0.05);
+		}
+
+		.diff-line-wrapper.added .diff-line-content {
 			color: #4caf50;
-			border-left: 3px solid #4caf50;
+		}
+
+		.diff-line-btn {
+			padding: 3px 10px;
+			border: 1px solid var(--vscode-button-border);
+			border-radius: 3px;
+			cursor: pointer;
+			font-size: 11px;
+			font-weight: 500;
+			transition: all 0.15s;
+			white-space: nowrap;
+			flex-shrink: 0;
+			font-family: var(--vscode-font-family);
+		}
+
+		.diff-line-btn.keep {
+			background: var(--vscode-button-background);
+			color: var(--vscode-button-foreground);
+			border-color: var(--vscode-button-background);
+		}
+
+		.diff-line-btn.keep:hover {
+			opacity: 0.9;
+			transform: translateY(-1px);
+		}
+
+		.diff-line-btn.undo {
+			background: transparent;
+			color: var(--vscode-foreground);
+			border-color: var(--vscode-panel-border);
+		}
+
+		.diff-line-btn.undo:hover {
+			background: var(--vscode-list-hoverBackground);
+		}
+
+		.diff-line-btn:disabled {
+			opacity: 0.4;
+			cursor: not-allowed;
+		}
+
+		.diff-actions-bar {
+			display: flex;
+			justify-content: flex-end;
+			gap: 8px;
+			padding: 8px 12px;
+			border-top: 1px solid var(--vscode-panel-border);
+			background: var(--vscode-sideBar-background);
+			border-radius: 0 0 6px 6px;
+		}
+
+		.diff-action-btn {
+			padding: 4px 12px;
+			border: 1px solid var(--vscode-button-border);
+			border-radius: 3px;
+			cursor: pointer;
+			font-size: 11px;
+			font-weight: 500;
+			transition: all 0.15s;
+			font-family: var(--vscode-font-family);
+		}
+
+		.diff-action-btn.undo-all {
+			background: transparent;
+			color: var(--vscode-foreground);
+			border-color: var(--vscode-panel-border);
+		}
+
+		.diff-action-btn.undo-all:hover {
+			background: var(--vscode-list-hoverBackground);
+		}
+
+		.diff-action-btn.keep-all {
+			background: var(--vscode-button-background);
+			color: var(--vscode-button-foreground);
+			border-color: var(--vscode-button-background);
+		}
+
+		.diff-action-btn.keep-all:hover {
+			opacity: 0.9;
 		}
 
 		.suggestion-actions {
@@ -906,8 +1049,37 @@ export class ChatbotPanel {
 
 		let apiKeySet = false;
 		let lastMessageRole = null;
+		let messages = [];
+
+		// Restore messages from state
+		const state = vscode.getState();
+		if (state && state.messages) {
+			messages = state.messages;
+			messages.forEach(msg => {
+				if (msg.type === 'message') {
+					addMessageToUI(msg.content, msg.role);
+				} else if (msg.type === 'suggestion') {
+					addSuggestionToUI(msg.suggestion);
+				}
+			});
+			if (messages.length > 0) {
+				const lastMsg = messages[messages.length - 1];
+				lastMessageRole = lastMsg.role || (lastMsg.type === 'suggestion' ? 'assistant' : null);
+			}
+		}
+
+		function saveState() {
+			vscode.setState({ messages: messages });
+		}
 
 		function addMessage(content, role) {
+			// Save to messages array
+			messages.push({ type: 'message', content: content, role: role });
+			saveState();
+			addMessageToUI(content, role);
+		}
+
+		function addMessageToUI(content, role) {
 			const messageDiv = document.createElement('div');
 			messageDiv.className = \`message \${role}\`;
 			
@@ -933,6 +1105,13 @@ export class ChatbotPanel {
 		}
 
 		function addSuggestion(suggestion) {
+			// Save to messages array
+			messages.push({ type: 'suggestion', suggestion: suggestion });
+			saveState();
+			addSuggestionToUI(suggestion);
+		}
+
+		function addSuggestionToUI(suggestion) {
 			const messageDiv = document.createElement('div');
 			messageDiv.className = 'message assistant';
 			
@@ -984,71 +1163,198 @@ export class ChatbotPanel {
 				const diffContainer = document.createElement('div');
 				diffContainer.className = 'diff-container';
 				
-				// Handle new format: diff.removed and diff.added arrays
-				if (suggestion.diff.removed && Array.isArray(suggestion.diff.removed)) {
-					suggestion.diff.removed.forEach(line => {
-						const removedLine = document.createElement('div');
-						removedLine.className = 'diff-line removed';
-						removedLine.textContent = '- ' + line;
-						diffContainer.appendChild(removedLine);
-					});
+				let totalChanges = 0;
+				
+				// Handle new format: diff.removed and diff.added arrays - show as pairs with buttons
+				if (suggestion.diff.removed && Array.isArray(suggestion.diff.removed) && 
+					suggestion.diff.added && Array.isArray(suggestion.diff.added)) {
+					
+					const maxLength = Math.max(suggestion.diff.removed.length, suggestion.diff.added.length);
+					totalChanges = maxLength;
+					
+					for (let i = 0; i < maxLength; i++) {
+						const pair = document.createElement('div');
+						pair.className = 'diff-pair';
+						
+						// Removed line (if exists)
+						if (i < suggestion.diff.removed.length) {
+							const removedWrapper = document.createElement('div');
+							removedWrapper.className = 'diff-line-wrapper removed';
+							
+							const removedLine = document.createElement('div');
+							removedLine.className = 'diff-line removed';
+							
+							const lineNum = document.createElement('span');
+							lineNum.className = 'diff-line-num';
+							lineNum.textContent = (i + 1).toString();
+							
+							const lineContent = document.createElement('span');
+							lineContent.className = 'diff-line-content';
+							lineContent.textContent = suggestion.diff.removed[i];
+							
+							removedLine.appendChild(lineNum);
+							removedLine.appendChild(lineContent);
+							
+							const actions = document.createElement('div');
+							actions.className = 'diff-line-actions';
+							
+							const keepBtn = document.createElement('button');
+							keepBtn.className = 'diff-line-btn keep';
+							keepBtn.textContent = 'Keep';
+							keepBtn.onclick = () => {
+								vscode.postMessage({ 
+									command: 'applySuggestion', 
+									suggestion: suggestion 
+								});
+								diffContainer.querySelectorAll('.diff-line-btn').forEach(btn => {
+									btn.disabled = true;
+									if (btn.classList.contains('keep')) {
+										btn.textContent = 'Kept ✓';
+									}
+								});
+							};
+							
+							const undoBtn = document.createElement('button');
+							undoBtn.className = 'diff-line-btn undo';
+							undoBtn.textContent = 'Undo';
+							undoBtn.onclick = () => {
+								pair.style.display = 'none';
+							};
+							
+							actions.appendChild(keepBtn);
+							actions.appendChild(undoBtn);
+							
+							removedWrapper.appendChild(removedLine);
+							removedWrapper.appendChild(actions);
+							pair.appendChild(removedWrapper);
+						}
+						
+						// Added line (if exists)
+						if (i < suggestion.diff.added.length) {
+							const addedWrapper = document.createElement('div');
+							addedWrapper.className = 'diff-line-wrapper added';
+							
+							const addedLine = document.createElement('div');
+							addedLine.className = 'diff-line added';
+							
+							const lineNum = document.createElement('span');
+							lineNum.className = 'diff-line-num';
+							lineNum.textContent = (i + 1).toString();
+							
+							const lineContent = document.createElement('span');
+							lineContent.className = 'diff-line-content';
+							lineContent.textContent = suggestion.diff.added[i];
+							
+							addedLine.appendChild(lineNum);
+							addedLine.appendChild(lineContent);
+							
+							// Only add buttons if we haven't already added them for removed line
+							if (i >= suggestion.diff.removed.length) {
+								const actions = document.createElement('div');
+								actions.className = 'diff-line-actions';
+								
+								const keepBtn = document.createElement('button');
+								keepBtn.className = 'diff-line-btn keep';
+								keepBtn.textContent = 'Keep';
+								keepBtn.onclick = () => {
+									vscode.postMessage({ 
+										command: 'applySuggestion', 
+										suggestion: suggestion 
+									});
+									diffContainer.querySelectorAll('.diff-line-btn').forEach(btn => {
+										btn.disabled = true;
+										if (btn.classList.contains('keep')) {
+											btn.textContent = 'Kept ✓';
+										}
+									});
+								};
+								
+								const undoBtn = document.createElement('button');
+								undoBtn.className = 'diff-line-btn undo';
+								undoBtn.textContent = 'Undo';
+								undoBtn.onclick = () => {
+									pair.style.display = 'none';
+								};
+								
+								actions.appendChild(keepBtn);
+								actions.appendChild(undoBtn);
+								
+								addedWrapper.appendChild(addedLine);
+								addedWrapper.appendChild(actions);
+							} else {
+								addedWrapper.appendChild(addedLine);
+							}
+							
+							pair.appendChild(addedWrapper);
+						}
+						
+						diffContainer.appendChild(pair);
+					}
+				} else {
+					// Handle old format: diff.old and diff.new (for backward compatibility)
+					if (suggestion.diff.old && !suggestion.diff.removed) {
+						const oldWrapper = document.createElement('div');
+						oldWrapper.className = 'diff-line-wrapper removed';
+						
+						const oldLine = document.createElement('div');
+						oldLine.className = 'diff-line removed';
+						oldLine.textContent = suggestion.diff.old;
+						oldWrapper.appendChild(oldLine);
+						diffContainer.appendChild(oldWrapper);
+						totalChanges = 1;
+					}
+					
+					if (suggestion.diff.new && !suggestion.diff.added) {
+						const newWrapper = document.createElement('div');
+						newWrapper.className = 'diff-line-wrapper added';
+						
+						const newLine = document.createElement('div');
+						newLine.className = 'diff-line added';
+						newLine.textContent = suggestion.diff.new;
+						newWrapper.appendChild(newLine);
+						diffContainer.appendChild(newWrapper);
+						if (totalChanges === 0) totalChanges = 1;
+					}
 				}
 				
-				if (suggestion.diff.added && Array.isArray(suggestion.diff.added)) {
-					suggestion.diff.added.forEach(line => {
-						const addedLine = document.createElement('div');
-						addedLine.className = 'diff-line added';
-						addedLine.textContent = '+ ' + line;
-						diffContainer.appendChild(addedLine);
-					});
-				}
-				
-				// Handle old format: diff.old and diff.new (for backward compatibility)
-				if (suggestion.diff.old && !suggestion.diff.removed) {
-					const oldLine = document.createElement('div');
-					oldLine.className = 'diff-line removed';
-					oldLine.textContent = '- ' + suggestion.diff.old;
-					diffContainer.appendChild(oldLine);
-				}
-				
-				if (suggestion.diff.new && !suggestion.diff.added) {
-					const newLine = document.createElement('div');
-					newLine.className = 'diff-line added';
-					newLine.textContent = '+ ' + suggestion.diff.new;
-					diffContainer.appendChild(newLine);
+				// Add action bar with "Keep All" and "Undo All" buttons
+				if (totalChanges > 0) {
+					const actionsBar = document.createElement('div');
+					actionsBar.className = 'diff-actions-bar';
+					
+					const undoAllBtn = document.createElement('button');
+					undoAllBtn.className = 'diff-action-btn undo-all';
+					undoAllBtn.textContent = 'Undo All';
+					undoAllBtn.onclick = () => {
+						card.style.display = 'none';
+					};
+					
+					const keepAllBtn = document.createElement('button');
+					keepAllBtn.className = 'diff-action-btn keep-all';
+					keepAllBtn.textContent = 'Keep All';
+					keepAllBtn.onclick = () => {
+						vscode.postMessage({ 
+							command: 'applySuggestion', 
+							suggestion: suggestion 
+						});
+						diffContainer.querySelectorAll('.diff-line-btn').forEach(btn => {
+							btn.disabled = true;
+							if (btn.classList.contains('keep')) {
+								btn.textContent = 'Kept ✓';
+							}
+						});
+						keepAllBtn.disabled = true;
+						keepAllBtn.textContent = 'All Kept ✓';
+					};
+					
+					actionsBar.appendChild(undoAllBtn);
+					actionsBar.appendChild(keepAllBtn);
+					diffContainer.appendChild(actionsBar);
 				}
 				
 				card.appendChild(diffContainer);
 			}
-			
-			const actions = document.createElement('div');
-			actions.className = 'suggestion-actions';
-			
-			const applyBtn = document.createElement('button');
-			applyBtn.className = 'suggestion-btn apply';
-			applyBtn.textContent = 'Accept Suggestion';
-			applyBtn.onclick = () => {
-				// Pass the full suggestion object including filePath and suggestedContent
-				vscode.postMessage({ 
-					command: 'applySuggestion', 
-					suggestion: suggestion 
-				});
-				// Update button to show it was applied
-				applyBtn.textContent = 'Applied ✓';
-				applyBtn.disabled = true;
-				applyBtn.style.opacity = '0.6';
-			};
-			
-			const dismissBtn = document.createElement('button');
-			dismissBtn.className = 'suggestion-btn dismiss';
-			dismissBtn.textContent = 'Dismiss';
-			dismissBtn.onclick = () => {
-				card.style.display = 'none';
-			};
-			
-			actions.appendChild(applyBtn);
-			actions.appendChild(dismissBtn);
-			card.appendChild(actions);
+			// Action buttons are now inline with each diff line, and "Keep All"/"Undo All" are in the diff container
 			
 			contentDiv.appendChild(card);
 			messageDiv.appendChild(avatar);
