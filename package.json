@@ -1,8 +1,10 @@
 {
-  "name": "stike-extension",
-  "displayName": "Stike Extension",
-  "description": "VS Code extension for Stike",
+  "name": "strikegirl-extension",
+  "displayName": "Strike Girl AI",
+  "description": "VS Code extension for Strike Code Reviewer",
+  "publisher": "UmaSahni",
   "version": "0.0.1",
+  "icon": "logo.jpg",
   "engines": {
     "vscode": "^1.74.0"
   },
@@ -16,21 +18,21 @@
   "contributes": {
     "commands": [
       {
-        "command": "stike.reviewCode",
+        "command": "strikegirl.reviewCode",
         "title": "Review and Fix Code",
-        "category": "Stike"
+        "category": "Strike Girl AI"
       },
       {
-        "command": "stike.openChatbot",
+        "command": "strikegirl.openChatbot",
         "title": "Open Chatbot",
-        "category": "Stike",
+        "category": "Strike Girl AI",
         "icon": "$(comment-discussion)"
       }
     ],
     "configuration": {
-      "title": "Stike Code Reviewer",
+      "title": "Strike Girl AI",
       "properties": {
-        "stike.apiKey": {
+        "strikegirl.apiKey": {
           "type": "string",
           "default": "",
           "description": "Google GenAI API Key (or set GOOGLE_GENAI_API_KEY environment variable)",
@@ -49,11 +51,12 @@
   },
   "dependencies": {
     "@google/genai": "^1.34.0",
+    "@vscode/vsce": "^3.7.1",
     "dotenv": "^17.2.3"
   },
   "devDependencies": {
-    "@types/vscode": "^1.74.0",
     "@types/node": "16.x",
+    "@types/vscode": "^1.74.0",
     "@typescript-eslint/eslint-plugin": "^5.45.0",
     "@typescript-eslint/parser": "^5.45.0",
     "eslint": "^8.28.0",

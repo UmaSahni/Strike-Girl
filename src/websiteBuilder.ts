@@ -216,13 +216,14 @@ EXAMPLE for a calculator:
 					break;
 				}
 			} catch (error: any) {
-				const errorMsg = error?.message || 'Unknown error occurred';
-				this.outputChannel.appendLine(`❌ Error: ${errorMsg}`);
+				const errorMsg = error?.message || error?.toString() || 'Unknown error occurred';
+				const errorString = typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg);
+				this.outputChannel.appendLine(`❌ Error: ${errorString}`);
 				if (this.chatbotPanel) {
-					this.chatbotPanel.sendError(errorMsg);
+					this.chatbotPanel.sendError(errorString);
 					this.chatbotPanel.sendProgressComplete();
 				}
-				vscode.window.showErrorMessage(`Website build failed: ${errorMsg}`);
+				vscode.window.showErrorMessage(`Website build failed: ${errorString}`);
 				break;
 			}
 		}

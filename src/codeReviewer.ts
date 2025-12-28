@@ -345,12 +345,13 @@ If no files were fixed in a category, write: "No [category] fixes required."`,
 					break;
 				}
 			} catch (error: any) {
-				const errorMsg = error?.message || 'Unknown error occurred';
-				this.outputChannel.appendLine(`❌ Error: ${errorMsg}`);
+				const errorMsg = error?.message || error?.toString() || 'Unknown error occurred';
+				const errorString = typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg);
+				this.outputChannel.appendLine(`❌ Error: ${errorString}`);
 				if (this.chatbotPanel) {
-					this.chatbotPanel.sendError(errorMsg);
+					this.chatbotPanel.sendError(errorString);
 				}
-				vscode.window.showErrorMessage(`Code review failed: ${errorMsg}`);
+				vscode.window.showErrorMessage(`Code review failed: ${errorString}`);
 				break;
 			}
 		}

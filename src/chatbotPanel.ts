@@ -24,12 +24,15 @@ export class ChatbotPanel {
 
 		const panel = vscode.window.createWebviewPanel(
 			ChatbotPanel.viewType,
-			'Stike Code Reviewer',
+			'Strike Girl AI – Don\'t Trust Blindly',
 			column || vscode.ViewColumn.One,
 			{
 				enableScripts: true,
 				retainContextWhenHidden: true,
-				localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')]
+				localResourceRoots: [
+					vscode.Uri.joinPath(extensionUri, 'media'),
+					extensionUri
+				]
 			}
 		);
 
@@ -84,7 +87,7 @@ export class ChatbotPanel {
 	}
 
 	private _checkInitialState() {
-		const config = vscode.workspace.getConfiguration('stike');
+		const config = vscode.workspace.getConfiguration('strikegirl');
 		let apiKey = config.get<string>('apiKey', '');
 		
 		if (!apiKey) {
@@ -126,7 +129,7 @@ export class ChatbotPanel {
 			this._sendMessage({ 
 				type: 'message', 
 				role: 'assistant', 
-				content: 'Welcome to Stike Code Reviewer! I can help you:\n- Review and fix code\n- Build websites\n\nTo get started, please enter your Google GenAI API Key below.' 
+				content: 'Welcome to Strike Girl AI! I can help you:\n- Review and fix code\n- Build websites\n\nTo get started, please enter your Google GenAI API Key below.' 
 			});
 		}
 	}
@@ -142,7 +145,7 @@ export class ChatbotPanel {
 		}
 
 		this._apiKey = apiKey;
-		const config = vscode.workspace.getConfiguration('stike');
+		const config = vscode.workspace.getConfiguration('strikegirl');
 		await config.update('apiKey', apiKey, vscode.ConfigurationTarget.Global);
 		
 		this._sendMessage({ type: 'apiKeySet' });
@@ -318,7 +321,7 @@ export class ChatbotPanel {
 		}
 
 		try {
-			vscode.commands.executeCommand('stike.buildWebsiteFromChatbot', projectDescription, this._apiKey);
+			vscode.commands.executeCommand('strikegirl.buildWebsiteFromChatbot', projectDescription, this._apiKey);
 		} catch (error: any) {
 			this._sendMessage({ 
 				type: 'message', 
@@ -343,7 +346,7 @@ export class ChatbotPanel {
 			role: 'assistant', 
 			content: 'Starting code review... This may take a few moments.' 
 		});
-		vscode.commands.executeCommand('stike.reviewCodeFromChatbot', folderPath, this._apiKey);
+		vscode.commands.executeCommand('strikegirl.reviewCodeFromChatbot', folderPath, this._apiKey);
 	}
 
 	public sendMessage(content: string, role: 'user' | 'assistant' = 'assistant') {
@@ -381,7 +384,36 @@ export class ChatbotPanel {
 	}
 
 	public sendError(error: string) {
+		// Check if error is related to invalid API key
+		if (this._isApiKeyError(error)) {
+			this._handleInvalidApiKey();
+			return;
+		}
 		this._sendMessage({ type: 'message', role: 'assistant', content: `Error: ${error}` });
+	}
+
+	private _isApiKeyError(error: string): boolean {
+		const errorLower = error.toLowerCase();
+		return errorLower.includes('api key not valid') ||
+			errorLower.includes('api_key_invalid') ||
+			errorLower.includes('invalid api key') ||
+			errorLower.includes('api key is invalid') ||
+			(errorLower.includes('invalid_argument') && errorLower.includes('api'));
+	}
+
+	private async _handleInvalidApiKey() {
+		// Clear the stored API key
+		this._apiKey = null;
+		const config = vscode.workspace.getConfiguration('strikegirl');
+		await config.update('apiKey', '', vscode.ConfigurationTarget.Global);
+		
+		// Show API key input again
+		this._sendMessage({ type: 'showApiKeyInput' });
+		this._sendMessage({
+			type: 'message',
+			role: 'assistant',
+			content: '❌ The API key you entered is invalid. Please enter a valid Google GenAI API key below.'
+		});
 	}
 
 	private async _showDiffEditor(suggestion: {
@@ -407,7 +439,7 @@ export class ChatbotPanel {
 		try {
 			// Create a temporary file with the suggested content
 			const tempDir = os.tmpdir();
-			const tempFileName = `stike-preview-${Date.now()}-${suggestion.fileName}`;
+			const tempFileName = `strikegirl-preview-${Date.now()}-${suggestion.fileName}`;
 			const tempFilePath = path.join(tempDir, tempFileName);
 			
 			// Write suggested content to temp file
@@ -475,12 +507,13 @@ export class ChatbotPanel {
 	}
 
 	private _getHtmlForWebview(webview: vscode.Webview) {
+		const logoUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'logo.jpg'));
 		return `<!DOCTYPE html>
 <html lang="en">
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>Stike Code Reviewer</title>
+	<title>Strike Girl AI – Don't Trust Blindly</title>
 	<style>
 		* {
 			margin: 0;
@@ -549,6 +582,15 @@ export class ChatbotPanel {
 			align-items: center;
 			justify-content: center;
 			font-size: 18px;
+			overflow: hidden;
+			aspect-ratio: 1;
+		}
+
+		.message-avatar img {
+			width: 100%;
+			height: 100%;
+			object-fit: cover;
+			border-radius: 50%;
 		}
 
 		.message-avatar.hidden {
@@ -561,8 +603,8 @@ export class ChatbotPanel {
 		}
 
 		.message.assistant .message-avatar {
-			background: var(--vscode-textLink-foreground);
-			color: white;
+			background: transparent;
+			padding: 2px;
 		}
 
 		.message-content {
@@ -993,7 +1035,7 @@ export class ChatbotPanel {
 </head>
 <body>
 	<div class="header">
-		<div class="header-title">Stike Code Reviewer</div>
+		<div class="header-title">Strike Girl AI – Don't Trust Blindly</div>
 	</div>
 
 	<div class="chat-container">
@@ -1032,6 +1074,7 @@ export class ChatbotPanel {
 
 	<script>
 		const vscode = acquireVsCodeApi();
+		const logoUri = ${JSON.stringify(logoUri.toString())};
 		const messagesContainer = document.getElementById('messages');
 		const apiKeyInput = document.getElementById('apiKeyInput');
 		const saveApiKeyBtn = document.getElementById('saveApiKeyBtn');
@@ -1080,7 +1123,15 @@ export class ChatbotPanel {
 			
 			const avatar = document.createElement('div');
 			avatar.className = 'message-avatar';
-			avatar.textContent = role === 'user' ? '👤' : '🤖';
+			
+			if (role === 'user') {
+				avatar.textContent = '👤';
+			} else {
+				const img = document.createElement('img');
+				img.src = logoUri;
+				img.alt = 'Strike Girl AI';
+				avatar.appendChild(img);
+			}
 			
 			// Only show avatar if role changed from last message
 			if (lastMessageRole === role) {
@@ -1112,7 +1163,10 @@ export class ChatbotPanel {
 			
 			const avatar = document.createElement('div');
 			avatar.className = 'message-avatar';
-			avatar.textContent = '🤖';
+			const img = document.createElement('img');
+			img.src = logoUri;
+			img.alt = 'Stike';
+			avatar.appendChild(img);
 			
 			// Only show avatar if role changed from last message
 			if (lastMessageRole === 'assistant') {
@@ -1305,7 +1359,10 @@ export class ChatbotPanel {
 			
 			const avatar = document.createElement('div');
 			avatar.className = 'message-avatar';
-			avatar.textContent = '🤖';
+			const img = document.createElement('img');
+			img.src = logoUri;
+			img.alt = 'Stike';
+			avatar.appendChild(img);
 			
 			// Only show avatar if role changed from last message
 			if (lastMessageRole === 'assistant') {
@@ -1347,7 +1404,10 @@ export class ChatbotPanel {
 			
 			const avatar = document.createElement('div');
 			avatar.className = 'message-avatar';
-			avatar.textContent = '🤖';
+			const img = document.createElement('img');
+			img.src = logoUri;
+			img.alt = 'Stike';
+			avatar.appendChild(img);
 			
 			// Only show avatar if role changed from last message
 			if (lastMessageRole === 'assistant') {
@@ -1439,6 +1499,14 @@ export class ChatbotPanel {
 					apiKeySet = true;
 					apiKeyContainer.style.display = 'none';
 					chatInputContainer.style.display = 'block';
+					break;
+				
+				case 'showApiKeyInput':
+					apiKeySet = false;
+					apiKeyContainer.style.display = 'block';
+					chatInputContainer.style.display = 'none';
+					apiKeyInput.value = '';
+					apiKeyInput.focus();
 					break;
 				
 				case 'showFolderSelection':
