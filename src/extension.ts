@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { CodeReviewer } from './codeReviewer';
 import { ChatbotPanel } from './chatbotPanel';
+import { WebsiteBuilder } from './websiteBuilder';
 
 let outputChannel: vscode.OutputChannel;
 
@@ -54,10 +55,37 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 
+	// Register command to build website from chatbot
+	const buildWebsiteDisposable = vscode.commands.registerCommand('stike.buildWebsiteFromChatbot', async (projectDescription: string, apiKey: string) => {
+		const chatbotPanel = ChatbotPanel.currentPanel;
+		
+		if (!chatbotPanel) {
+			vscode.window.showErrorMessage('Chatbot panel is not open.');
+			return;
+		}
+
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+		if (!workspaceFolders || workspaceFolders.length === 0) {
+			vscode.window.showErrorMessage('No workspace folder open. Please open a folder first.');
+			return;
+		}
+
+		try {
+			const workspacePath = workspaceFolders[0].uri.fsPath;
+			const builder = new WebsiteBuilder(apiKey, outputChannel, chatbotPanel);
+			await builder.buildWebsite(projectDescription, workspacePath);
+		} catch (error: any) {
+			const errorMsg = error?.message || 'Unknown error occurred';
+			chatbotPanel.sendError(errorMsg);
+			vscode.window.showErrorMessage(`Website build failed: ${errorMsg}`);
+		}
+	});
+
 	context.subscriptions.push(
 		openChatbotDisposable, 
 		reviewCodeDisposable, 
-		reviewCodeLegacyDisposable, 
+		reviewCodeLegacyDisposable,
+		buildWebsiteDisposable,
 		outputChannel
 	);
 }

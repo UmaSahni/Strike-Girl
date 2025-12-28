@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import * as path from 'path';
 
 export class ChatbotPanel {
@@ -56,6 +57,11 @@ export class ChatbotPanel {
 							await this._handleStartReview(message.folderPath);
 						}
 						return;
+					case 'buildWebsite':
+						if (message.projectDescription) {
+							await this._handleBuildWebsite(message.projectDescription);
+						}
+						return;
 					case 'sendMessage':
 						await this._handleUserMessage(message.text);
 						return;
@@ -87,7 +93,7 @@ export class ChatbotPanel {
 					this._sendMessage({ 
 						type: 'message', 
 						role: 'assistant', 
-						content: 'Welcome back! Your API key is configured. I found your workspace folder. Would you like me to start reviewing your code?' 
+						content: 'Welcome back! Your API key is configured. I can help you:\n- Review code: Type "start review" or "review calculator" (for specific folder)\n- Build websites: Type "build website: [description]" or "create a calculator app"' 
 					});
 					this._sendMessage({ type: 'showStartButton', folderPath: workspaceFolders[0].uri.fsPath, folderName: workspaceFolders[0].name });
 				} else {
@@ -105,14 +111,14 @@ export class ChatbotPanel {
 				this._sendMessage({ 
 					type: 'message', 
 					role: 'assistant', 
-					content: 'Welcome back! Please open a workspace folder to get started with code review.' 
+					content: 'Welcome back! Please open a workspace folder to get started. I can help you review code or build websites.' 
 				});
 			}
 		} else {
 			this._sendMessage({ 
 				type: 'message', 
 				role: 'assistant', 
-				content: 'Welcome to Stike Code Reviewer! To get started, please enter your Google GenAI API Key below.' 
+				content: 'Welcome to Stike Code Reviewer! I can help you:\n- Review and fix code\n- Build websites\n\nTo get started, please enter your Google GenAI API Key below.' 
 			});
 		}
 	}
@@ -162,10 +168,45 @@ export class ChatbotPanel {
 		}
 	}
 
+	private async _findFolderInWorkspace(folderName: string, workspacePath: string): Promise<string | null> {
+		try {
+			function searchDirectory(dir: string, targetName: string): string | null {
+				try {
+					const items = fs.readdirSync(dir);
+					for (const item of items) {
+						const fullPath = path.join(dir, item);
+						const stat = fs.statSync(fullPath);
+						
+						if (stat.isDirectory()) {
+							// Check if folder name matches (case-insensitive)
+							if (item.toLowerCase() === targetName.toLowerCase()) {
+								return fullPath;
+							}
+							// Recursively search subdirectories
+							const found = searchDirectory(fullPath, targetName);
+							if (found) {
+								return found;
+							}
+						}
+					}
+				} catch (error) {
+					// Skip directories we can't read
+				}
+				return null;
+			}
+			
+			return searchDirectory(workspacePath, folderName);
+		} catch (error) {
+			return null;
+		}
+	}
+
 	private async _handleUserMessage(text: string) {
 		if (!text || !text.trim()) return;
 
-		if (text.toLowerCase().includes('start review') || text.toLowerCase().includes('review code')) {
+		const lowerText = text.toLowerCase();
+
+		if (lowerText.includes('start review') || lowerText.includes('review code') || lowerText.includes('review')) {
 			const workspaceFolders = vscode.workspace.workspaceFolders;
 			if (!workspaceFolders || workspaceFolders.length === 0) {
 				this._sendMessage({ 
@@ -176,7 +217,31 @@ export class ChatbotPanel {
 				return;
 			}
 
-			if (workspaceFolders.length === 1) {
+			// Check if user specified a folder name
+			const reviewPatterns = [
+				/review\s+(?:code\s+in\s+)?([a-zA-Z0-9_-]+)/i,
+				/review\s+([a-zA-Z0-9_-]+)/i,
+				/start\s+review\s+(?:in\s+)?([a-zA-Z0-9_-]+)/i
+			];
+
+			let targetFolder: string | null = null;
+			for (const pattern of reviewPatterns) {
+				const match = text.match(pattern);
+				if (match && match[1]) {
+					const folderName = match[1];
+					const workspacePath = workspaceFolders[0].uri.fsPath;
+					targetFolder = await this._findFolderInWorkspace(folderName, workspacePath);
+					if (targetFolder) {
+						break;
+					}
+				}
+			}
+
+			if (targetFolder) {
+				// Found specific folder, review it
+				await this._handleStartReview(targetFolder);
+			} else if (workspaceFolders.length === 1) {
+				// No specific folder mentioned, review entire workspace
 				await this._handleStartReview(workspaceFolders[0].uri.fsPath);
 			} else {
 				this._sendMessage({ 
@@ -189,11 +254,68 @@ export class ChatbotPanel {
 					folders: workspaceFolders.map(f => ({ path: f.uri.fsPath, name: f.name }))
 				});
 			}
+		} else if (
+			lowerText.includes('build website') || 
+			lowerText.includes('create website') || 
+			lowerText.includes('make website') ||
+			lowerText.includes('build a ') ||
+			lowerText.includes('create a ') ||
+			lowerText.includes('make a ') ||
+			lowerText.includes(' create ') ||
+			lowerText.includes(' build ') ||
+			lowerText.includes(' make ')
+		) {
+			// Extract project description (remove trigger words but keep the description)
+			let description = text;
+			
+			// Remove common trigger phrases
+			description = description.replace(/^(build|create|make)\s+(website|a|an)?\s*:?\s*/i, '');
+			description = description.replace(/^(build|create|make)\s+website\s*/i, '');
+			description = description.trim();
+			
+			// If we still have a meaningful description, use it
+			if (description && description.length > 3) {
+				await this._handleBuildWebsite(description);
+			} else {
+				// If we don't have a description, try using the original text
+				await this._handleBuildWebsite(text);
+			}
 		} else {
 			this._sendMessage({ 
 				type: 'message', 
 				role: 'assistant', 
-				content: 'I can help you review and fix your code. Type "start review" to begin, or select a folder using the buttons above.' 
+				content: 'I can help you:\n- Review code: Type "start review" or "review calculator" (to review a specific folder)\n- Build websites: Type "build website: [description]" or "create a calculator app"' 
+			});
+		}
+	}
+
+	private async _handleBuildWebsite(projectDescription: string) {
+		if (!this._apiKey) {
+			this._sendMessage({ 
+				type: 'message', 
+				role: 'assistant', 
+				content: 'API key is required. Please enter your API key first.' 
+			});
+			return;
+		}
+
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+		if (!workspaceFolders || workspaceFolders.length === 0) {
+			this._sendMessage({ 
+				type: 'message', 
+				role: 'assistant', 
+				content: 'Please open a workspace folder first to build a website.' 
+			});
+			return;
+		}
+
+		try {
+			vscode.commands.executeCommand('stike.buildWebsiteFromChatbot', projectDescription, this._apiKey);
+		} catch (error: any) {
+			this._sendMessage({ 
+				type: 'message', 
+				role: 'assistant', 
+				content: `Error: ${error?.message || 'Failed to start website build'}` 
 			});
 		}
 	}
@@ -208,7 +330,7 @@ export class ChatbotPanel {
 			return;
 		}
 
-		const folderName = path.basename(folderPath);
+		const folderName = folderPath.split(/[\\/]/).pop() || folderPath;
 		const confirm = await vscode.window.showWarningMessage(
 			`Review and fix code in "${folderName}"? This will modify files.`,
 			'Yes, Start Review',
