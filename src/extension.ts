@@ -2,25 +2,26 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { CodeReviewer } from './codeReviewer';
 import { ChatbotPanel } from './chatbotPanel';
+import { WebsiteBuilder } from './websiteBuilder';
 
 let outputChannel: vscode.OutputChannel;
 
 export function activate(context: vscode.ExtensionContext) {
-	console.log('Stike Code Reviewer extension is now active!');
+	console.log('Strike Girl AI extension is now active!');
 
 	// Create output channel
-	outputChannel = vscode.window.createOutputChannel('Stike Code Reviewer');
+	outputChannel = vscode.window.createOutputChannel('Strike Girl AI');
 
 	// Open chatbot panel automatically when extension activates
 	ChatbotPanel.createOrShow(context.extensionUri);
 
 	// Register command to open chatbot panel
-	const openChatbotDisposable = vscode.commands.registerCommand('stike.openChatbot', () => {
+	const openChatbotDisposable = vscode.commands.registerCommand('strikegirl.openChatbot', () => {
 		ChatbotPanel.createOrShow(context.extensionUri);
 	});
 
 	// Register command to review code from chatbot
-	const reviewCodeDisposable = vscode.commands.registerCommand('stike.reviewCodeFromChatbot', async (folderPath: string, apiKey: string) => {
+	const reviewCodeDisposable = vscode.commands.registerCommand('strikegirl.reviewCodeFromChatbot', async (folderPath: string, apiKey: string) => {
 		const chatbotPanel = ChatbotPanel.currentPanel;
 		
 		if (!chatbotPanel) {
@@ -29,23 +30,18 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		try {
-			chatbotPanel.sendMessage('Starting code review...', 'assistant');
-			chatbotPanel.sendProgress('🔍 Analyzing code structure...');
-
 			const reviewer = new CodeReviewer(apiKey, outputChannel, chatbotPanel);
 			await reviewer.reviewCode(folderPath);
-
-			chatbotPanel.sendMessage('✅ Code review complete! Check the output channel for detailed results.', 'assistant');
-			outputChannel.show();
 		} catch (error: any) {
-			const errorMsg = error?.message || 'Unknown error occurred';
-			chatbotPanel.sendError(errorMsg);
-			vscode.window.showErrorMessage(`Code review failed: ${errorMsg}`);
+			const errorMsg = error?.message || error?.toString() || 'Unknown error occurred';
+			const errorString = typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg);
+			chatbotPanel.sendError(errorString);
+			vscode.window.showErrorMessage(`Code review failed: ${errorString}`);
 		}
 	});
 
 	// Register command to start review (legacy command, now triggers chatbot)
-	const reviewCodeLegacyDisposable = vscode.commands.registerCommand('stike.reviewCode', async () => {
+	const reviewCodeLegacyDisposable = vscode.commands.registerCommand('strikegirl.reviewCode', async () => {
 		const workspaceFolders = vscode.workspace.workspaceFolders;
 		if (!workspaceFolders || workspaceFolders.length === 0) {
 			vscode.window.showErrorMessage('No workspace folder open. Please open a folder first.');
@@ -60,10 +56,38 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 
+	// Register command to build website from chatbot
+	const buildWebsiteDisposable = vscode.commands.registerCommand('strikegirl.buildWebsiteFromChatbot', async (projectDescription: string, apiKey: string) => {
+		const chatbotPanel = ChatbotPanel.currentPanel;
+		
+		if (!chatbotPanel) {
+			vscode.window.showErrorMessage('Chatbot panel is not open.');
+			return;
+		}
+
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+		if (!workspaceFolders || workspaceFolders.length === 0) {
+			vscode.window.showErrorMessage('No workspace folder open. Please open a folder first.');
+			return;
+		}
+
+		try {
+			const workspacePath = workspaceFolders[0].uri.fsPath;
+			const builder = new WebsiteBuilder(apiKey, outputChannel, chatbotPanel);
+			await builder.buildWebsite(projectDescription, workspacePath);
+		} catch (error: any) {
+			const errorMsg = error?.message || error?.toString() || 'Unknown error occurred';
+			const errorString = typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg);
+			chatbotPanel.sendError(errorString);
+			vscode.window.showErrorMessage(`Website build failed: ${errorString}`);
+		}
+	});
+
 	context.subscriptions.push(
 		openChatbotDisposable, 
 		reviewCodeDisposable, 
-		reviewCodeLegacyDisposable, 
+		reviewCodeLegacyDisposable,
+		buildWebsiteDisposable,
 		outputChannel
 	);
 }

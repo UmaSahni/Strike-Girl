@@ -8,11 +8,24 @@ export class CodeReviewer {
 	private ai: GoogleGenAI;
 	private outputChannel: vscode.OutputChannel;
 	private chatbotPanel?: ChatbotPanel;
+	private baseDirectory: string = '';
 
 	constructor(apiKey: string, outputChannel: vscode.OutputChannel, chatbotPanel?: ChatbotPanel) {
 		this.ai = new GoogleGenAI({ apiKey });
 		this.outputChannel = outputChannel;
 		this.chatbotPanel = chatbotPanel;
+	}
+
+	private getRelativePath(filePath: string): string {
+		if (!this.baseDirectory) {
+			return filePath;
+		}
+		try {
+			const relative = path.relative(this.baseDirectory, filePath);
+			return relative || path.basename(filePath);
+		} catch {
+			return filePath;
+		}
 	}
 
 	async listFiles(directory: string): Promise<{ files: string[] }> {
@@ -52,8 +65,10 @@ export class CodeReviewer {
 		}
 
 		scan(directory);
-		this.outputChannel.appendLine(`Found ${files.length} files`);
+		const message = `📁 Found ${files.length} files`;
+		this.outputChannel.appendLine(message);
 		if (this.chatbotPanel) {
+			this.chatbotPanel.sendMessage(message, 'assistant');
 			this.chatbotPanel.sendProgress(`📁 Found ${files.length} files to review`);
 		}
 		return { files };
@@ -61,22 +76,82 @@ export class CodeReviewer {
 
 	async readFile(filePath: string): Promise<{ content: string }> {
 		const content = fs.readFileSync(filePath, 'utf-8');
-		const fileName = path.basename(filePath);
-		this.outputChannel.appendLine(`Reading: ${filePath}`);
+		const relativePath = this.getRelativePath(filePath);
+		const message = `📖 Reading: ${relativePath}`;
+		this.outputChannel.appendLine(`Reading: ${relativePath}`);
 		if (this.chatbotPanel) {
-			this.chatbotPanel.sendProgress(`📖 Reading: ${fileName}`);
+			this.chatbotPanel.sendMessage(message, 'assistant');
+			this.chatbotPanel.sendProgress(message);
 		}
 		return { content };
 	}
 
 	async writeFile(filePath: string, content: string): Promise<{ success: boolean }> {
-		fs.writeFileSync(filePath, content, 'utf-8');
-		const fileName = path.basename(filePath);
-		this.outputChannel.appendLine(`✍️  Fixed: ${filePath}`);
-		if (this.chatbotPanel) {
-			this.chatbotPanel.sendProgress(`✍️  Fixed: ${fileName}`);
+		// Read current file content
+		let originalContent = '';
+		try {
+			originalContent = fs.readFileSync(filePath, 'utf-8');
+		} catch (error) {
+			// File doesn't exist, treat as new file
+			originalContent = '';
 		}
+
+		// If content is the same, no need to show suggestion
+		if (originalContent === content) {
+			const relativePath = this.getRelativePath(filePath);
+			const message = `ℹ️  No changes needed: ${relativePath}`;
+			this.outputChannel.appendLine(message);
+			if (this.chatbotPanel) {
+				this.chatbotPanel.sendMessage(message, 'assistant');
+			}
+			return { success: true };
+		}
+
+		// Generate diff
+		const diff = this.generateDiff(originalContent, content);
+		const relativePath = this.getRelativePath(filePath);
+
+		// Send suggestion to chatbot panel instead of writing directly
+		if (this.chatbotPanel) {
+			this.chatbotPanel.sendCodeSuggestion({
+				filePath: filePath,
+				fileName: path.basename(filePath),
+				originalContent: originalContent,
+				suggestedContent: content,
+				diff: diff,
+				relativePath: relativePath
+			});
+		}
+
+		// Return success but don't actually write yet - wait for user approval
 		return { success: true };
+	}
+
+	private generateDiff(oldContent: string, newContent: string): { removed: string[], added: string[] } {
+		const oldLines = oldContent.split('\n');
+		const newLines = newContent.split('\n');
+		
+		const removed: string[] = [];
+		const added: string[] = [];
+		
+		// Simple line-by-line diff
+		const maxLength = Math.max(oldLines.length, newLines.length);
+		
+		for (let i = 0; i < maxLength; i++) {
+			if (i >= oldLines.length) {
+				// New lines added
+				added.push(newLines[i]);
+			} else if (i >= newLines.length) {
+				// Lines removed
+				removed.push(oldLines[i]);
+			} else if (oldLines[i] !== newLines[i]) {
+				// Line changed
+				removed.push(oldLines[i]);
+				added.push(newLines[i]);
+			}
+		}
+		
+		return { removed, added };
 	}
 
 	private getTools() {
@@ -88,10 +163,12 @@ export class CodeReviewer {
 	}
 
 	async reviewCode(directoryPath: string): Promise<void> {
+		this.baseDirectory = directoryPath;
 		this.outputChannel.appendLine(`🔍 Reviewing: ${directoryPath}\n`);
 		this.outputChannel.show();
 
 		if (this.chatbotPanel) {
+			this.chatbotPanel.sendMessage(`🔍 Starting code review...`, 'assistant');
 			this.chatbotPanel.sendProgress(`🔍 Starting code review...`);
 		}
 
@@ -140,21 +217,27 @@ export class CodeReviewer {
 📊 CODE REVIEW COMPLETE
 
 Total Files Analyzed: X
-Files Fixed: Y
+Files Fixed: Y (only count files where write_file was actually called)
+
+CRITICAL RULES:
+1. Only list files that were ACTUALLY modified using write_file
+2. For each file, specify the line number(s) and describe EXACTLY what was changed
+3. Be specific: describe the actual code change, not just the problem category
+4. Format: filename:line - Specific change description
 
 🔴 SECURITY FIXES:
-- file.js:line - Fixed hardcoded API key
-- auth.js:line - Removed eval() usage
+- file.js:line 15 - Replaced hardcoded API key 'abc123xyz' with process.env.API_KEY
+- auth.js:line 42 - Removed eval(userInput) and replaced with safe JSON.parse(userInput)
 
 🟠 BUG FIXES:
-- app.js:line - Added null check for user object
-- index.html:line - Added missing alt attribute
+- app.js:line 28 - Added null check: if (!user) return; before accessing user.name
+- index.html:line 12 - Added missing alt attribute: <img src="logo.png" alt="Company Logo">
 
 🟡 CODE QUALITY IMPROVEMENTS:
-- styles.css:line - Removed duplicate styles
-- script.js:line - Removed console.log statements
+- styles.css:line 45 - Removed duplicate .header { margin: 0; padding: 0; } rule
+- script.js:line 67 - Removed console.log('User data:', userData) debug statement
 
-Be practical and focus on real issues. Actually FIX the code, don't just report.`,
+If no files were fixed in a category, write: "No [category] fixes required."`,
 						tools: [{
 							functionDeclarations: [
 								{
@@ -219,14 +302,16 @@ Be practical and focus on real issues. Actually FIX the code, don't just report.
 							continue;
 						}
 
+						const actionMap: { [key: string]: string } = {
+							'list_files': '📌 Scanning files...',
+							'read_file': '📌 Analyzing code...',
+							'write_file': '📌 Applying fixes...'
+						};
+						const actionMessage = actionMap[name] || `📌 ${name}`;
 						this.outputChannel.appendLine(`📌 ${name}`);
 						if (this.chatbotPanel) {
-							const actionMap: { [key: string]: string } = {
-								'list_files': '📁 Scanning files...',
-								'read_file': '📖 Analyzing code...',
-								'write_file': '✍️  Applying fixes...'
-							};
-							this.chatbotPanel.sendProgress(actionMap[name] || `Processing ${name}...`);
+							this.chatbotPanel.sendMessage(actionMessage, 'assistant');
+							this.chatbotPanel.sendProgress(actionMessage);
 						}
 
 						const toolResponse = await (tools as any)[name](args);
@@ -252,18 +337,21 @@ Be practical and focus on real issues. Actually FIX the code, don't just report.
 					const summary = result.text || '';
 					this.outputChannel.appendLine('\n' + summary);
 					if (this.chatbotPanel) {
-						this.chatbotPanel.sendMessage('✅ Code review complete!\n\n```\n' + summary + '\n```', 'assistant');
+						this.chatbotPanel.sendProgressComplete();
+						const formattedSummary = summary.replace(/```/g, '').trim();
+						this.chatbotPanel.sendMessage(`✅ Code review complete!\n\n${formattedSummary}`, 'assistant');
 					}
-					vscode.window.showInformationMessage('Code review complete! Check the output channel for details.');
+					vscode.window.showInformationMessage('Code review complete! Check the chatbot for details.');
 					break;
 				}
 			} catch (error: any) {
-				const errorMsg = error?.message || 'Unknown error occurred';
-				this.outputChannel.appendLine(`❌ Error: ${errorMsg}`);
+				const errorMsg = error?.message || error?.toString() || 'Unknown error occurred';
+				const errorString = typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg);
+				this.outputChannel.appendLine(`❌ Error: ${errorString}`);
 				if (this.chatbotPanel) {
-					this.chatbotPanel.sendError(errorMsg);
+					this.chatbotPanel.sendError(errorString);
 				}
-				vscode.window.showErrorMessage(`Code review failed: ${errorMsg}`);
+				vscode.window.showErrorMessage(`Code review failed: ${errorString}`);
 				break;
 			}
 		}
