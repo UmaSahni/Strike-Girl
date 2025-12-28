@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 
 export class ChatbotPanel {
 	public static currentPanel: ChatbotPanel | undefined;
@@ -68,6 +69,9 @@ export class ChatbotPanel {
 						return;
 					case 'applySuggestion':
 						await this._handleApplySuggestion(message.suggestion);
+						return;
+					case 'previewChanges':
+						await this._handlePreviewChanges(message.suggestion);
 						return;
 					case 'ready':
 						this._checkInitialState();
@@ -399,6 +403,40 @@ export class ChatbotPanel {
 		});
 	}
 
+	private async _handlePreviewChanges(suggestion: any) {
+		try {
+			// Create a temporary file with the suggested content
+			const tempDir = os.tmpdir();
+			const tempFileName = `stike-preview-${Date.now()}-${suggestion.fileName}`;
+			const tempFilePath = path.join(tempDir, tempFileName);
+			
+			// Write suggested content to temp file
+			fs.writeFileSync(tempFilePath, suggestion.suggestedContent, 'utf-8');
+			
+			// Open original file and temp file in diff editor
+			const originalUri = vscode.Uri.file(suggestion.filePath);
+			const tempUri = vscode.Uri.file(tempFilePath);
+			
+			await vscode.commands.executeCommand('vscode.diff', originalUri, tempUri, 
+				`${suggestion.relativePath || suggestion.fileName} (Original ↔ Preview)`);
+			
+			// Clean up temp file when the diff editor is closed
+			// Note: We'll clean it up after a delay, or the user can close it manually
+			setTimeout(() => {
+				try {
+					if (fs.existsSync(tempFilePath)) {
+						fs.unlinkSync(tempFilePath);
+					}
+				} catch (error) {
+					// Ignore cleanup errors
+				}
+			}, 60000); // Clean up after 60 seconds
+			
+		} catch (error: any) {
+			vscode.window.showErrorMessage(`Failed to preview changes: ${error.message}`);
+		}
+	}
+
 	private async _handleApplySuggestion(suggestion: any) {
 		try {
 			// Write the suggested content to the file
@@ -647,21 +685,6 @@ export class ChatbotPanel {
 			background: var(--vscode-list-hoverBackground);
 		}
 
-		.diff-line-wrapper:hover .diff-line-actions {
-			opacity: 1;
-		}
-
-		.diff-line-actions {
-			display: flex;
-			gap: 6px;
-			margin-left: auto;
-			opacity: 0;
-			transition: opacity 0.2s;
-		}
-
-		.diff-line-wrapper:hover .diff-line-actions {
-			opacity: 1;
-		}
 
 		.diff-line {
 			flex: 1;
@@ -712,44 +735,6 @@ export class ChatbotPanel {
 			color: #4caf50;
 		}
 
-		.diff-line-btn {
-			padding: 3px 10px;
-			border: 1px solid var(--vscode-button-border);
-			border-radius: 3px;
-			cursor: pointer;
-			font-size: 11px;
-			font-weight: 500;
-			transition: all 0.15s;
-			white-space: nowrap;
-			flex-shrink: 0;
-			font-family: var(--vscode-font-family);
-		}
-
-		.diff-line-btn.keep {
-			background: var(--vscode-button-background);
-			color: var(--vscode-button-foreground);
-			border-color: var(--vscode-button-background);
-		}
-
-		.diff-line-btn.keep:hover {
-			opacity: 0.9;
-			transform: translateY(-1px);
-		}
-
-		.diff-line-btn.undo {
-			background: transparent;
-			color: var(--vscode-foreground);
-			border-color: var(--vscode-panel-border);
-		}
-
-		.diff-line-btn.undo:hover {
-			background: var(--vscode-list-hoverBackground);
-		}
-
-		.diff-line-btn:disabled {
-			opacity: 0.4;
-			cursor: not-allowed;
-		}
 
 		.diff-actions-bar {
 			display: flex;
@@ -770,6 +755,16 @@ export class ChatbotPanel {
 			font-weight: 500;
 			transition: all 0.15s;
 			font-family: var(--vscode-font-family);
+		}
+
+		.diff-action-btn.preview {
+			background: var(--vscode-button-secondaryBackground);
+			color: var(--vscode-button-secondaryForeground);
+			border-color: var(--vscode-button-border);
+		}
+
+		.diff-action-btn.preview:hover {
+			background: var(--vscode-button-secondaryHoverBackground);
 		}
 
 		.diff-action-btn.undo-all {
@@ -1195,37 +1190,7 @@ export class ChatbotPanel {
 							removedLine.appendChild(lineNum);
 							removedLine.appendChild(lineContent);
 							
-							const actions = document.createElement('div');
-							actions.className = 'diff-line-actions';
-							
-							const keepBtn = document.createElement('button');
-							keepBtn.className = 'diff-line-btn keep';
-							keepBtn.textContent = 'Keep';
-							keepBtn.onclick = () => {
-								vscode.postMessage({ 
-									command: 'applySuggestion', 
-									suggestion: suggestion 
-								});
-								diffContainer.querySelectorAll('.diff-line-btn').forEach(btn => {
-									btn.disabled = true;
-									if (btn.classList.contains('keep')) {
-										btn.textContent = 'Kept ✓';
-									}
-								});
-							};
-							
-							const undoBtn = document.createElement('button');
-							undoBtn.className = 'diff-line-btn undo';
-							undoBtn.textContent = 'Undo';
-							undoBtn.onclick = () => {
-								pair.style.display = 'none';
-							};
-							
-							actions.appendChild(keepBtn);
-							actions.appendChild(undoBtn);
-							
 							removedWrapper.appendChild(removedLine);
-							removedWrapper.appendChild(actions);
 							pair.appendChild(removedWrapper);
 						}
 						
@@ -1248,42 +1213,7 @@ export class ChatbotPanel {
 							addedLine.appendChild(lineNum);
 							addedLine.appendChild(lineContent);
 							
-							// Only add buttons if we haven't already added them for removed line
-							if (i >= suggestion.diff.removed.length) {
-								const actions = document.createElement('div');
-								actions.className = 'diff-line-actions';
-								
-								const keepBtn = document.createElement('button');
-								keepBtn.className = 'diff-line-btn keep';
-								keepBtn.textContent = 'Keep';
-								keepBtn.onclick = () => {
-									vscode.postMessage({ 
-										command: 'applySuggestion', 
-										suggestion: suggestion 
-									});
-									diffContainer.querySelectorAll('.diff-line-btn').forEach(btn => {
-										btn.disabled = true;
-										if (btn.classList.contains('keep')) {
-											btn.textContent = 'Kept ✓';
-										}
-									});
-								};
-								
-								const undoBtn = document.createElement('button');
-								undoBtn.className = 'diff-line-btn undo';
-								undoBtn.textContent = 'Undo';
-								undoBtn.onclick = () => {
-									pair.style.display = 'none';
-								};
-								
-								actions.appendChild(keepBtn);
-								actions.appendChild(undoBtn);
-								
-								addedWrapper.appendChild(addedLine);
-								addedWrapper.appendChild(actions);
-							} else {
-								addedWrapper.appendChild(addedLine);
-							}
+							addedWrapper.appendChild(addedLine);
 							
 							pair.appendChild(addedWrapper);
 						}
@@ -1317,10 +1247,20 @@ export class ChatbotPanel {
 					}
 				}
 				
-				// Add action bar with "Keep All" and "Undo All" buttons
+				// Add action bar with "Preview Changes", "Keep All", and "Undo All" buttons
 				if (totalChanges > 0) {
 					const actionsBar = document.createElement('div');
 					actionsBar.className = 'diff-actions-bar';
+					
+					const previewBtn = document.createElement('button');
+					previewBtn.className = 'diff-action-btn preview';
+					previewBtn.textContent = 'Preview Changes';
+					previewBtn.onclick = () => {
+						vscode.postMessage({ 
+							command: 'previewChanges', 
+							suggestion: suggestion 
+						});
+					};
 					
 					const undoAllBtn = document.createElement('button');
 					undoAllBtn.className = 'diff-action-btn undo-all';
@@ -1337,16 +1277,11 @@ export class ChatbotPanel {
 							command: 'applySuggestion', 
 							suggestion: suggestion 
 						});
-						diffContainer.querySelectorAll('.diff-line-btn').forEach(btn => {
-							btn.disabled = true;
-							if (btn.classList.contains('keep')) {
-								btn.textContent = 'Kept ✓';
-							}
-						});
 						keepAllBtn.disabled = true;
 						keepAllBtn.textContent = 'All Kept ✓';
 					};
 					
+					actionsBar.appendChild(previewBtn);
 					actionsBar.appendChild(undoAllBtn);
 					actionsBar.appendChild(keepAllBtn);
 					diffContainer.appendChild(actionsBar);
@@ -1354,7 +1289,6 @@ export class ChatbotPanel {
 				
 				card.appendChild(diffContainer);
 			}
-			// Action buttons are now inline with each diff line, and "Keep All"/"Undo All" are in the diff container
 			
 			contentDiv.appendChild(card);
 			messageDiv.appendChild(avatar);
